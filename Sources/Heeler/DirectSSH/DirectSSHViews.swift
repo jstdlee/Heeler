@@ -3,11 +3,13 @@ import SwiftUI
 import UIKit
 import UniformTypeIdentifiers
 
-/// What a Direct SSH screen borrows from the app (ADR 0039).
+/// What a Direct SSH screen borrows from the app (ADR 0039), and the
+/// window's open SSH Terminal sessions.
 @MainActor
 struct DirectSSHContext {
     let terminal: TerminalSettings
     let activity: AppActivityCoordinator
+    let sessions: DirectSSHSessions
 }
 
 extension EnvironmentValues {
@@ -15,24 +17,17 @@ extension EnvironmentValues {
     @Entry var directSSHContext: DirectSSHContext? = nil
 }
 
-/// One Direct SSH screen asked for from the Host list.
-struct DirectSSHRequest: Identifiable, Hashable {
-    enum Kind: Hashable {
-        case terminal
-        case files
-    }
-
+/// A Host's Files screen asked for from the Host list. SSH Terminals open
+/// through `DirectSSHSessions` instead, so they outlive their screen.
+struct DirectSSHFilesRequest: Identifiable, Hashable {
     let host: Host
-    let kind: Kind
 
-    var id: String { "\(host.id)-\(kind)" }
+    var id: Host.ID { host.id }
 }
 
-/// Owns the screen's connection: the Host's login shell or its files, over
-/// one Direct SSH connection that ends when the screen does.
-struct DirectSSHScreen: View {
-    let request: DirectSSHRequest
-    let context: DirectSSHContext
+/// Owns the Files screen's connection, which ends when the screen does.
+struct DirectSSHFilesScreen: View {
+    let request: DirectSSHFilesRequest
     let onClose: () -> Void
 
     @State private var session: DirectSSHSession?
@@ -40,13 +35,8 @@ struct DirectSSHScreen: View {
     var body: some View {
         Group {
             if let session {
-                switch request.kind {
-                case .terminal:
-                    DirectSSHTerminalScreen(session: session, context: context, onClose: onClose)
-                case .files:
-                    NavigationStack {
-                        RemoteFileBrowserView(session: session, onClose: onClose)
-                    }
+                NavigationStack {
+                    RemoteFileBrowserView(session: session, onClose: onClose)
                 }
             } else {
                 Color(uiColor: .systemBackground).ignoresSafeArea()
@@ -56,53 +46,6 @@ struct DirectSSHScreen: View {
             if session == nil { session = DirectSSHSession(host: request.host) }
         }
         .onDisappear { session?.close() }
-    }
-}
-
-/// The Host's login shell in Heeler's terminal: the same renderer, keyboard
-/// row and paste review as a herdr Shell Terminal, with no herdr behind it.
-struct DirectSSHTerminalScreen: View {
-    let session: DirectSSHSession
-    let context: DirectSSHContext
-    let onClose: () -> Void
-
-    @State private var store: ShellTerminalStore?
-
-    var body: some View {
-        Group {
-            if let store {
-                ShellTerminalView(
-                    store: store,
-                    agentID: ConsoleAgent.ID(hostID: session.host.id, paneID: store.identity.paneID),
-                    terminal: context.terminal,
-                    activity: context.activity,
-                    isReturning: false,
-                    finishedMessage: "The shell ended.",
-                    offersTakeOver: false,
-                    title: session.host.displayName,
-                    backTitle: "Close",
-                    backReturnsToAgent: false,
-                    onBack: { onClose() })
-                    .environment(\.showsDetailBackButton, true)
-            } else {
-                Color.black.ignoresSafeArea()
-            }
-        }
-        .onAppear {
-            if store == nil { store = makeStore() }
-        }
-    }
-
-    private func makeStore() -> ShellTerminalStore {
-        let id = UUID().uuidString
-        return ShellTerminalStore(
-            identity: ShellTerminalIdentity(
-                paneID: "direct-ssh-\(id)", tabID: "direct-ssh", terminalID: id),
-            attachTarget: .loginShell(id),
-            transportGeneration: nil,
-            takeover: false,
-            isOnStage: { true },
-            runTerminal: session.terminalRunner())
     }
 }
 
@@ -269,8 +212,10 @@ struct RemoteFileBrowserView: View {
                 }
             }
             Section {
-                ForEach(store.visibleItems) { item in
-                    row(item, store: store)
+                // `@Sendable` content through `MainActorContent`: SwiftUI can
+                // render ForEach content off the main actor (#471).
+                ForEach(store.visibleItems) { @Sendable item in
+                    MainActorContent { row(item, store: store) }
                 }
             } footer: {
                 if store.isTruncated {

@@ -42,12 +42,19 @@ struct ShellTerminalView: View {
     /// Whether Back and Close Terminal land on `agentID`'s detail. False on
     /// the Console's terminal detail, whose Back returns to the Agent list.
     var backReturnsToAgent = true
+    /// Offers the Snippets tab in the Keys dock. Agent screens keep their own;
+    /// a Direct SSH shell turns it on (ADR 0039).
+    var offersSnippets = false
+    /// Header menu items after the screen's own, such as Direct SSH's
+    /// session switcher.
+    var extraHeaderActions: [AgentDetailHeaderAction] = []
     let onBack: @MainActor () async -> Void
 
     @State private var keyboardControl = TerminalKeyboardControl()
     @State private var keyboardMode: TerminalKeyboardMode = .text
     @State private var keyboardInset = TerminalKeyboardInset()
     @State private var isConfirmingClose = false
+    @State private var isManagingSnippets = false
     @Environment(\.colorScheme) private var colorScheme
     /// The scene root's window, known before this screen first renders.
     @Environment(\.sceneWindow) private var sceneWindow
@@ -310,7 +317,9 @@ struct ShellTerminalView: View {
                 ShellTerminalKeysDock(
                     settings: terminal,
                     height: keyboardLayout.availableToolsHeight,
-                    control: keyboardControl)
+                    control: keyboardControl,
+                    snippets: offersSnippets ? terminal.snippets : nil,
+                    onManageSnippets: { isManagingSnippets = true })
                 .opacity(isKeysDockPresented ? 1 : 0)
                 .allowsHitTesting(isKeysDockPresented)
                 .accessibilityHidden(!isKeysDockPresented)
@@ -400,6 +409,11 @@ struct ShellTerminalView: View {
             ) {
                 pasteReviewSheet
             }
+            // Presenting this takes the keyboard down and dismissing brings it
+            // back, as on Agent detail.
+            .sheet(isPresented: $isManagingSnippets) {
+                SnippetsManagementView(store: terminal.snippets)
+            }
             .alert(
                 "Paste Blocked",
                 isPresented: Binding(
@@ -479,14 +493,14 @@ struct ShellTerminalView: View {
     }
 
     private var backHeaderActions: [AgentDetailHeaderAction] {
-        guard workspaceDrawer != nil else { return [] }
+        guard workspaceDrawer != nil else { return extraHeaderActions }
         return [AgentDetailHeaderAction(title: "Terminals", systemImage: "apple.terminal.on.rectangle") {
             withAnimation(reduceMotion ? nil : .snappy(duration: 0.24)) {
                 // Folded, the menu unfolds the header the panel drops from.
                 isBackHeaderExpanded = true
                 isHeaderDrawerOpen.toggle()
             }
-        }]
+        }] + extraHeaderActions
     }
 
     /// `restoresSystemKeyboard` is false when Text follows a fresh surface
@@ -855,14 +869,23 @@ struct ShellTerminalInputRow: View {
 }
 
 /// The shell terminal's Keys dock shares its full keyboard with Agent tools.
-/// Appearance is available alongside it; Skills and Snippets stay Agent-specific.
+/// Appearance is available alongside it. Skills stay Agent-specific; Snippets
+/// appear when the screen passes a store, and insert into the shell through
+/// paste review without pressing Return (ADR 0009).
 struct ShellTerminalKeysDock: View {
     let settings: TerminalSettings
     let height: CGFloat
     let control: TerminalKeyboardControl
+    var snippets: SnippetStore? = nil
+    var onManageSnippets: () -> Void = {}
     @State private var selectedTab: TerminalKeysTab = .controls
 
     static let tabs: [TerminalKeysTab] = [.controls, .appearance]
+    static let tabsWithSnippets: [TerminalKeysTab] = [.controls, .snippets, .appearance]
+
+    private var visibleTabs: [TerminalKeysTab] {
+        snippets == nil ? Self.tabs : Self.tabsWithSnippets
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -877,7 +900,17 @@ struct ShellTerminalKeysDock: View {
                         themes: settings.themes,
                         zoom: settings.zoom,
                         fonts: settings.fonts)
-                case .skills, .snippets:
+                case .snippets:
+                    if let snippets {
+                        SnippetsKeyboardPane(
+                            store: snippets,
+                            onSend: { snippet in
+                                control.paste(snippet.body)
+                                selectedTab = .controls
+                            },
+                            onManage: onManageSnippets)
+                    }
+                case .skills:
                     EmptyView()
                 }
             }
@@ -885,7 +918,7 @@ struct ShellTerminalKeysDock: View {
 
             Divider()
             HStack(spacing: 4) {
-                ForEach(Self.tabs) { @Sendable tab in
+                ForEach(visibleTabs) { @Sendable tab in
                     MainActorContent {
                         let isSelected = selectedTab == tab
                         Button {

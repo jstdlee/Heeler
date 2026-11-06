@@ -15,6 +15,8 @@ struct ContentView: View {
     /// this window.
     @Binding var windowRoute: AgentRoute?
     @State private var notificationRouter = AgentNotificationRouter()
+    /// This window's open SSH Terminals (ADR 0039).
+    @State private var directSSHSessions = DirectSSHSessions()
     @State private var sceneID = UUID()
     @State private var window = WindowReference()
     /// A dragged row's Agent that reached this scene before it restored.
@@ -53,7 +55,8 @@ struct ContentView: View {
         // The Hosts list's SSH Terminal and Files actions (ADR 0039).
         .environment(
             \.directSSHContext,
-            DirectSSHContext(terminal: app.terminal, activity: app.activity))
+            DirectSSHContext(
+                terminal: app.terminal, activity: app.activity, sessions: directSSHSessions))
         .environment(\.sceneWindow, window)
         .environment(
             \.agentSceneRouting,

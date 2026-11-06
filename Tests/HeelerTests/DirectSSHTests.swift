@@ -114,3 +114,96 @@ struct DirectSSHTests {
         #expect(!unknownTotal.contains(" of "))
     }
 }
+
+@MainActor
+@Suite("Direct SSH sessions")
+struct DirectSSHSessionsTests {
+    private static let mac = Host(name: "Mac", address: "mac.local", username: "dev")
+    private static let pi = Host(name: "Pi", address: "pi.local", username: "pi")
+
+    /// Sessions whose connections are never dialed: a shell starts only once
+    /// its terminal reports a size, which no view does here.
+    private func makeSessions() -> DirectSSHSessions {
+        DirectSSHSessions { host in
+            DirectSSHSession(host: host) { throw TransportError.cancelled }
+        }
+    }
+
+    @Test func opensSessionsInFrontAndNumbersThemPerHost() {
+        let sessions = makeSessions()
+        let first = sessions.open(Self.mac)
+        let second = sessions.open(Self.mac)
+        let other = sessions.open(Self.pi)
+
+        #expect(sessions.tabs.map(\.title) == ["Mac", "Mac (2)", "Pi"])
+        #expect(sessions.selected?.id == other.id)
+        #expect(sessions.isPresented)
+        #expect(first.store.attachTarget != second.store.attachTarget)
+        if case .loginShell = first.store.attachTarget {} else {
+            Issue.record("A session must attach to a login shell")
+        }
+    }
+
+    @Test func hidingKeepsEverySessionAndShowBringsOneBack() {
+        let sessions = makeSessions()
+        let first = sessions.open(Self.mac)
+        sessions.open(Self.pi)
+
+        sessions.hide()
+        #expect(!sessions.isPresented)
+        #expect(sessions.tabs.count == 2)
+
+        sessions.show(first.id)
+        #expect(sessions.isPresented)
+        #expect(sessions.selected?.id == first.id)
+    }
+
+    @Test func closingTheFrontSessionBringsItsNeighbourForward() {
+        let sessions = makeSessions()
+        let first = sessions.open(Self.mac)
+        let middle = sessions.open(Self.mac)
+        let last = sessions.open(Self.pi)
+
+        sessions.select(middle.id)
+        sessions.close(middle.id)
+        #expect(sessions.tabs.map(\.id) == [first.id, last.id])
+        #expect(sessions.selected?.id == last.id)
+
+        sessions.close(last.id)
+        #expect(sessions.selected?.id == first.id)
+        #expect(sessions.isPresented)
+    }
+
+    @Test func closingTheLastSessionHidesTheScreen() {
+        let sessions = makeSessions()
+        sessions.open(Self.mac)
+        sessions.open(Self.pi)
+
+        sessions.closeAll()
+        #expect(sessions.tabs.isEmpty)
+        #expect(sessions.selected == nil)
+        #expect(!sessions.isPresented)
+    }
+
+    @Test func aNewSessionNumbersPastTheHighestStillOpen() {
+        let sessions = makeSessions()
+        let first = sessions.open(Self.mac)
+        sessions.open(Self.mac)
+        sessions.close(first.id)
+
+        #expect(sessions.open(Self.mac).title == "Mac (3)")
+    }
+
+    @Test func describesEachShellState() {
+        #expect(DirectSSHSessionRow.statusText(.live) == "Connected")
+        #expect(DirectSSHSessionRow.statusText(.connecting) == "Connecting")
+        #expect(DirectSSHSessionRow.statusText(.reconnecting) == "Reconnecting")
+        #expect(DirectSSHSessionRow.statusText(.ended("gone")) == "Disconnected")
+        #expect(DirectSSHSessionRow.statusText(.finished) == "Shell ended")
+    }
+
+    @Test func theShellDockOffersSnippetsOnlyWhenAsked() {
+        #expect(ShellTerminalKeysDock.tabs == [.controls, .appearance])
+        #expect(ShellTerminalKeysDock.tabsWithSnippets == [.controls, .snippets, .appearance])
+    }
+}

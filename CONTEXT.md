@@ -477,7 +477,8 @@ _Avoid_: exchange, round, step (one row within a turn)
 **Direct SSH**:
 A saved Host's own SSH session outside herdr, opened from its Hosts row:
 **SSH Terminal** runs the account's login shell in Heeler's terminal, and
-**Files** browses the Host over SFTP. It uses the Host's routes, credentials
+**Files** browses the Host over SFTP. A window keeps several SSH Terminals as
+its **SSH Sessions**, one in front, listed under Hosts until closed. It uses the Host's routes, credentials
 and already-trusted host key, and works with or without herdr on the Host
 (ADR 0039).
 _Avoid_: raw SSH, plain terminal

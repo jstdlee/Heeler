@@ -244,8 +244,8 @@ struct HostListView: View {
     @Environment(\.hostRemovalDependencies) private var removalDependencies
     /// Nil outside the app (previews, demo), which hides SSH Terminal and Files.
     @Environment(\.directSSHContext) private var directSSHContext
-    /// The Direct SSH screen in front of the list, if any (ADR 0039).
-    @State private var directSSHRequest: DirectSSHRequest?
+    /// The Files screen in front of the list, if any (ADR 0039).
+    @State private var filesRequest: DirectSSHFilesRequest?
     @State private var isAddingHost = false
     @State private var editingHost: Host?
     @State private var duplicateRequest: HostDuplicateRequest?
@@ -344,6 +344,13 @@ struct HostListView: View {
                                     systemImage: "externaldrive.badge.exclamationmark")
                             }
                         }
+                        if let sessions = directSSHContext?.sessions, !sessions.tabs.isEmpty {
+                            Section("SSH Sessions") {
+                                ForEach(sessions.tabs) { @Sendable tab in
+                                    MainActorContent { sessionRow(tab) }
+                                }
+                            }
+                        }
                         ForEach(HostListEntry.grouped(entries)) { @Sendable section in
                             MainActorContent {
                                 let isCollapsed = isCollapsed(section.group)
@@ -383,11 +390,22 @@ struct HostListView: View {
                         .disabled(store.catalogLoadError != nil)
                 }
             }
-            .fullScreenCover(item: $directSSHRequest) { request in
+            .fullScreenCover(item: $filesRequest) { request in
+                DirectSSHFilesScreen(request: request) { filesRequest = nil }
+            }
+            // The window's SSH Terminals; Back hides them, they keep running.
+            .fullScreenCover(
+                isPresented: Binding(
+                    get: { directSSHContext?.sessions.isPresented ?? false },
+                    set: { presented in
+                        if let sessions = directSSHContext?.sessions {
+                            sessions.isPresented = presented
+                        }
+                    })
+            ) {
                 if let directSSHContext {
-                    DirectSSHScreen(request: request, context: directSSHContext) {
-                        directSSHRequest = nil
-                    }
+                    DirectSSHSessionsScreen(
+                        sessions: directSSHContext.sessions, context: directSSHContext)
                 }
             }
             .navigationDestination(for: HostDetailDestination.self) { route in
@@ -607,13 +625,13 @@ struct HostListView: View {
         .swipeActions(edge: .leading, allowsFullSwipe: false) {
             if directSSHContext != nil, !isRemoving {
                 Button {
-                    directSSHRequest = DirectSSHRequest(host: host, kind: .terminal)
+                    directSSHContext?.sessions.open(host)
                 } label: {
                     Label("Terminal", systemImage: "terminal")
                 }
                 .tint(.indigo)
                 Button {
-                    directSSHRequest = DirectSSHRequest(host: host, kind: .files)
+                    filesRequest = DirectSSHFilesRequest(host: host)
                 } label: {
                     Label("Files", systemImage: "folder")
                 }
@@ -624,10 +642,10 @@ struct HostListView: View {
             Group {
                 if directSSHContext != nil {
                     Button("SSH Terminal", systemImage: "terminal") {
-                        directSSHRequest = DirectSSHRequest(host: host, kind: .terminal)
+                        directSSHContext?.sessions.open(host)
                     }
                     Button("Files", systemImage: "folder") {
-                        directSSHRequest = DirectSSHRequest(host: host, kind: .files)
+                        filesRequest = DirectSSHFilesRequest(host: host)
                     }
                     Divider()
                 }
@@ -638,6 +656,25 @@ struct HostListView: View {
                 }
             }
             .disabled(isRemoving)
+        }
+    }
+
+    /// An open SSH Terminal: tap to bring it back, swipe to end it.
+    private func sessionRow(_ tab: DirectSSHTerminalTab) -> some View {
+        Button {
+            directSSHContext?.sessions.show(tab.id)
+        } label: {
+            DirectSSHSessionRow(tab: tab)
+        }
+        .tint(.primary)
+        .listRowBackground(ListCard.fill)
+        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+            Button {
+                directSSHContext?.sessions.close(tab.id)
+            } label: {
+                Label("Close", systemImage: "xmark")
+            }
+            .tint(.red)
         }
     }
 

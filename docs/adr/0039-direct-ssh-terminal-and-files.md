@@ -25,14 +25,25 @@ routes and keys. We decided every saved Host also offers **SSH Terminal** and
   replace an existing item; delete removes files, links and empty folders
   only, since SFTP has no recursive delete and the browser does not fake one.
   `HeelerSSH` gained `removeDirectory` for this.
+- **Sessions.** SSH Terminals are a window's sessions, Termius-style:
+  several at once across Hosts, one in front. Each has its own connection,
+  shell pipeline and kept libghostty surface, so switching keeps every shell
+  and its scrollback. Back hides the sessions without ending them; they stay
+  listed under Hosts, and the header switches between them or opens another
+  on the same Host. A session's shell is the connection's: a session whose
+  connection does not survive iOS suspending the app reconnects to a new
+  shell. A shell that must outlive that belongs in tmux or a herdr terminal.
+- **Snippets.** The SSH Terminal's Keys dock offers the app's Snippets.
+  A Snippet goes in through paste review as a bracketed paste and is never
+  submitted, as ADR 0009 asks of Agents.
 - **Trust and credentials.** A Direct SSH connection dials with the Host's
   own routes and credentials and the Console's rule: only a host key already
   trusted for that Host is accepted, and it never prompts. One connection per
-  open screen, closed with the screen; a dropped line is redialed by the next
-  request, which starts a new shell.
+  session or Files screen, closed with it; a dropped line is redialed by the next
+  request, which starts a new shell. A Files screen has its own connection.
 - **Scope.** POSIX Hosts only; a native Windows Host says the feature is
-  unavailable. No port forwarding, agent forwarding, snippets or tabs of
-  sessions: those stay Termius territory until asked for.
+  unavailable. No port forwarding or agent forwarding: iOS stops a local
+  listener once the app leaves the foreground, and Heeler opens none.
 
 ## Consequences
 
