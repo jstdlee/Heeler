@@ -283,6 +283,9 @@ final class ShellTerminalStore {
     }
 
     let identity: ShellTerminalIdentity
+    /// What each pipeline attaches to: the herdr terminal by default, or a
+    /// Direct SSH login shell (ADR 0039).
+    let attachTarget: TerminalAttachTarget
     let input = TerminalInputController()
     private(set) var terminal: AttachTerminalStore
 
@@ -299,18 +302,21 @@ final class ShellTerminalStore {
 
     init(
         identity: ShellTerminalIdentity,
+        attachTarget: TerminalAttachTarget? = nil,
         transportGeneration: UInt64?,
         takeover: Bool = true,
         isOnStage: @escaping @MainActor () -> Bool,
         runTerminal: @escaping TerminalSessionRunner
     ) {
+        let attachTarget = attachTarget ?? .terminal(identity.terminalID)
         self.identity = identity
+        self.attachTarget = attachTarget
         self.takeover = takeover
         self.transportGeneration = transportGeneration
         self.isOnStage = isOnStage
         self.runTerminal = runTerminal
         terminal = Self.makeTerminal(
-            terminalID: identity.terminalID,
+            target: attachTarget,
             takeover: takeover,
             input: input,
             transportGeneration: transportGeneration,
@@ -465,7 +471,7 @@ final class ShellTerminalStore {
                 return
             }
             let replacement = Self.makeTerminal(
-                terminalID: self.identity.terminalID,
+                target: self.attachTarget,
                 takeover: self.takeover,
                 viewer: .resumed,
                 isViewed: previous.isViewed,
@@ -512,7 +518,7 @@ final class ShellTerminalStore {
                 return
             }
             let replacement = Self.makeTerminal(
-                terminalID: self.identity.terminalID,
+                target: self.attachTarget,
                 takeover: self.takeover,
                 isViewed: self.terminal.isViewed,
                 input: self.input,
@@ -582,7 +588,7 @@ final class ShellTerminalStore {
     }
 
     private static func makeTerminal(
-        terminalID: String,
+        target: TerminalAttachTarget,
         takeover: Bool,
         viewer: TerminalViewerRole = .interactive,
         isViewed: Bool = true,
@@ -595,7 +601,7 @@ final class ShellTerminalStore {
         runDidFinish: @escaping @MainActor @Sendable (TerminalSurfaceID) -> Void = { _ in }
     ) -> AttachTerminalStore {
         AttachTerminalStore(
-            target: .terminal(terminalID),
+            target: target,
             takeover: takeover,
             viewer: viewer,
             isViewed: isViewed,

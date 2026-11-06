@@ -50,6 +50,10 @@ struct ContentView: View {
         .environment(\.hostRemovalDependencies, app.hostRemoval)
         // Host detail's Helper actions reach what follows the Helper.
         .environment(\.hostOnboardingDependencies, app.hostOnboarding)
+        // The Hosts list's SSH Terminal and Files actions (ADR 0039).
+        .environment(
+            \.directSSHContext,
+            DirectSSHContext(terminal: app.terminal, activity: app.activity))
         .environment(\.sceneWindow, window)
         .environment(
             \.agentSceneRouting,

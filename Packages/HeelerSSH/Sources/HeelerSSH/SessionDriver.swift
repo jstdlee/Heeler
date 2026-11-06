@@ -1470,6 +1470,29 @@ actor SessionDriver {
         }
     }
 
+    /// Removes one empty directory. SFTP has no recursive remove, so a
+    /// directory that still holds entries fails with the server's status.
+    func removeSFTPDirectory(
+        id: UInt64,
+        path: String,
+        timeout: Duration
+    ) async throws {
+        try await withDiagnosticPhase("SFTP remove directory") {
+            guard Self.isValidSFTPPath(path) else { throw SSHError.channelFailed }
+            await acquireOperation()
+            defer { releaseOperation() }
+            let result = try await repeatUntilCompleteHoldingSFTP(
+                id: id,
+                deadline: ContinuousClock.now.advanced(by: timeout)
+            ) { sftp in
+                path.withCString { pathPointer in
+                    libssh2_sftp_rmdir_ex(sftp, pathPointer, UInt32(path.utf8.count))
+                }
+            }
+            try checkSFTPResult(result, sftpID: id)
+        }
+    }
+
     func sftpAttributes(
         id: UInt64,
         path: String,

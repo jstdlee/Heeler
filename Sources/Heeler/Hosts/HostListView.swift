@@ -242,6 +242,10 @@ struct HostListView: View {
     @State private var removal: HostRemovalStore
     @Environment(\.hostOnboardingDependencies) private var onboardingDependencies
     @Environment(\.hostRemovalDependencies) private var removalDependencies
+    /// Nil outside the app (previews, demo), which hides SSH Terminal and Files.
+    @Environment(\.directSSHContext) private var directSSHContext
+    /// The Direct SSH screen in front of the list, if any (ADR 0039).
+    @State private var directSSHRequest: DirectSSHRequest?
     @State private var isAddingHost = false
     @State private var editingHost: Host?
     @State private var duplicateRequest: HostDuplicateRequest?
@@ -377,6 +381,13 @@ struct HostListView: View {
                 ToolbarItem(placement: .primaryAction) {
                     Button("Add Host", systemImage: "plus") { isAddingHost = true }
                         .disabled(store.catalogLoadError != nil)
+                }
+            }
+            .fullScreenCover(item: $directSSHRequest) { request in
+                if let directSSHContext {
+                    DirectSSHScreen(request: request, context: directSSHContext) {
+                        directSSHRequest = nil
+                    }
                 }
             }
             .navigationDestination(for: HostDetailDestination.self) { route in
@@ -592,8 +603,34 @@ struct HostListView: View {
                 .tint(.red)
             }
         }
+        // Termius-style shortcuts straight to the Host's shell and files.
+        .swipeActions(edge: .leading, allowsFullSwipe: false) {
+            if directSSHContext != nil, !isRemoving {
+                Button {
+                    directSSHRequest = DirectSSHRequest(host: host, kind: .terminal)
+                } label: {
+                    Label("Terminal", systemImage: "terminal")
+                }
+                .tint(.indigo)
+                Button {
+                    directSSHRequest = DirectSSHRequest(host: host, kind: .files)
+                } label: {
+                    Label("Files", systemImage: "folder")
+                }
+                .tint(.blue)
+            }
+        }
         .contextMenu {
             Group {
+                if directSSHContext != nil {
+                    Button("SSH Terminal", systemImage: "terminal") {
+                        directSSHRequest = DirectSSHRequest(host: host, kind: .terminal)
+                    }
+                    Button("Files", systemImage: "folder") {
+                        directSSHRequest = DirectSSHRequest(host: host, kind: .files)
+                    }
+                    Divider()
+                }
                 Button("Edit", systemImage: "pencil") { editingHost = host }
                 Button("Duplicate", systemImage: "plus.square.on.square") { duplicate(host) }
                 Button("Remove Host", systemImage: "trash", role: .destructive) {

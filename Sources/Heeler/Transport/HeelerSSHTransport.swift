@@ -3383,6 +3383,17 @@ actor HeelerSSHTransport: Transport {
         do {
             let lease = try await channelAdmission.acquire(.attach)
             admissionLease = lease
+            if case .loginShell = request.target {
+                // A Direct SSH terminal (ADR 0039): the account's login shell,
+                // with no herdr socket, API or startup probe involved.
+                let channel = try await openLoginShellChannel(request)
+                return startAttachSession(
+                    request: request,
+                    channel: channel,
+                    lease: lease,
+                    attachCommand: Self.loginShellAttachCommand,
+                    dropsStartupProbe: false)
+            }
             let socketPath = try await resolvedSocketPath()
             let selectedAttachCommand = Self.attachCommand(
                 agentAttachCommand: attachCommand,
@@ -3432,35 +3443,118 @@ actor HeelerSSHTransport: Transport {
                 throw await mapOperationError(error)
             }
 
-            let outputGate = HeelerSSHAttachOutputGate()
-            let input = TerminalAttachInputQueue()
-            nextTerminalReaderID &+= 1
-            let readerID = nextTerminalReaderID
-            terminalChannelStates[request.target] = .streaming(readerID: readerID)
-            let readerTask = Task {
-                await self.runAttachChannel(
-                    target: request.target,
-                    readerID: readerID,
-                    channel: channel,
-                    admissionLease: lease,
-                    input: input,
-                    output: outputGate,
-                    attachCommand: selectedAttachCommand,
-                    dropsStartupProbe: dropsStartupProbe)
-            }
-            return TerminalAttachSession(
-                output: outputGate.makeOutput,
-                input: input,
-                onEndStarted: outputGate.beginExplicitEnd
-            ) {
-                input.finish()
-                readerTask.cancel()
-                await readerTask.value
-            }
+            return startAttachSession(
+                request: request,
+                channel: channel,
+                lease: lease,
+                attachCommand: selectedAttachCommand,
+                dropsStartupProbe: dropsStartupProbe)
         } catch {
             if let admissionLease { await admissionLease.release() }
             terminalChannelStates.removeValue(forKey: request.target)
             throw error
+        }
+    }
+
+    /// Starts the pumps for an opened attach channel and hands back the
+    /// session. The channel's admission lease is released when the reader ends.
+    private func startAttachSession(
+        request: TerminalAttachRequest,
+        channel: any HeelerSSHAttachChannel,
+        lease: SSHChannelAdmissionLease,
+        attachCommand: String,
+        dropsStartupProbe: Bool
+    ) -> TerminalAttachSession {
+        let outputGate = HeelerSSHAttachOutputGate()
+        let input = TerminalAttachInputQueue()
+        nextTerminalReaderID &+= 1
+        let readerID = nextTerminalReaderID
+        terminalChannelStates[request.target] = .streaming(readerID: readerID)
+        let readerTask = Task {
+            await self.runAttachChannel(
+                target: request.target,
+                readerID: readerID,
+                channel: channel,
+                admissionLease: lease,
+                input: input,
+                output: outputGate,
+                attachCommand: attachCommand,
+                dropsStartupProbe: dropsStartupProbe)
+        }
+        return TerminalAttachSession(
+            output: outputGate.makeOutput,
+            input: input,
+            onEndStarted: outputGate.beginExplicitEnd
+        ) {
+            input.finish()
+            readerTask.cancel()
+            await readerTask.value
+        }
+    }
+
+    // MARK: Direct SSH (ADR 0039)
+
+    /// What failure mapping names a login shell by. Never a bare `herdr`, so a
+    /// shell's exit is never read as a missing herdr binary.
+    static let loginShellAttachCommand = "login shell"
+
+    /// Runs the account's login shell under `/bin/sh`. The bootstrap marker
+    /// goes out first, so account-shell chatter before it stays off the
+    /// terminal. The shell is not `exec`ed: a shell exits with its last
+    /// command's status, and ending one is a normal end of the session, not
+    /// a failed attach, so the wrapper always reports 0.
+    static let loginShellCommand =
+        "/bin/sh -c '"
+        + "printf \"\(AttachBootstrapHandshake.markerPrintfFormat)\"; "
+        + "\"${SHELL:-/bin/sh}\" -l; exit 0'"
+
+    private func openLoginShellChannel(
+        _ request: TerminalAttachRequest
+    ) async throws -> any HeelerSSHAttachChannel {
+        try await requirePOSIXHost(feature: "SSH terminals")
+        guard (1...Int(UInt16.max)).contains(request.cols),
+            (1...Int(UInt16.max)).contains(request.rows)
+        else {
+            throw TransportError.channelFailed(detail: "Invalid terminal geometry")
+        }
+        do {
+            return try await connection.openPTY(
+                command: Self.loginShellCommand,
+                columns: request.cols,
+                rows: request.rows,
+                timeout: requestTimeout)
+        } catch {
+            if let error = error as? TransportError { throw error }
+            throw await mapOperationError(error)
+        }
+    }
+
+    /// Runs `body` with one SFTP subsystem channel for the Direct SSH file
+    /// browser, then closes the channel. The SSH package's own failures arrive
+    /// as `TransportError`; anything `body` throws of its own passes through.
+    func withDirectSFTP<Value: Sendable>(
+        _ body: @escaping @Sendable (SSHSFTPClient, Duration) async throws -> Value
+    ) async throws -> Value {
+        try await requirePOSIXHost(feature: "Files")
+        guard connected, await connection.isConnected else {
+            throw TransportError.channelFailed(detail: "The SSH connection is unavailable.")
+        }
+        let connection = connection
+        let timeout = requestTimeout
+        do {
+            return try await channelAdmission.withChannel(.ordinarySession) {
+                let sftp = try await connection.openSFTP(timeout: timeout)
+                do {
+                    let value = try await body(sftp, timeout)
+                    try? await sftp.close(timeout: .seconds(2))
+                    return value
+                } catch {
+                    try? await sftp.close(timeout: .seconds(2))
+                    throw error
+                }
+            }
+        } catch let error as SSHError {
+            throw await mapOperationError(error)
         }
     }
 
@@ -3550,6 +3644,8 @@ actor HeelerSSHTransport: Transport {
             agentAttachCommand
         case .terminal:
             terminalAttachCommand
+        case .loginShell:
+            loginShellAttachCommand
         }
     }
 

@@ -157,6 +157,12 @@ public final class SSHSFTPClient: Sendable {
     /// Removes one exact operation-owned path during failure compensation.
     /// This call ignores caller cancellation, verifies that the path is absent,
     /// and remains bounded by `timeout`.
+    /// Removes one empty directory; a directory with entries is refused by
+    /// the server.
+    public func removeDirectory(at path: String, timeout: Duration) async throws {
+        try await driver.removeSFTPDirectory(id: id, path: path, timeout: timeout)
+    }
+
     public func removeFileForCompensation(
         at path: String,
         timeout: Duration

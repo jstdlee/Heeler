@@ -474,6 +474,14 @@ as its program records it. Chat folds a finished turn's steps behind a
 tool calls as one group row; a running turn shows how long it has worked.
 _Avoid_: exchange, round, step (one row within a turn)
 
+**Direct SSH**:
+A saved Host's own SSH session outside herdr, opened from its Hosts row:
+**SSH Terminal** runs the account's login shell in Heeler's terminal, and
+**Files** browses the Host over SFTP. It uses the Host's routes, credentials
+and already-trusted host key, and works with or without herdr on the Host
+(ADR 0039).
+_Avoid_: raw SSH, plain terminal
+
 **Shell Terminal**:
 The full interactive terminal on an ordinary shell Pane, opened by Agent
 detail's edge-docked Workspace drawer, the Console's Terminals list, or Open

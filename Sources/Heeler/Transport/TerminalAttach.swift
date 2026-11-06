@@ -7,13 +7,19 @@ import Synchronization
 /// ordinary shell terminal instead addresses `herdr terminal attach` with the
 /// terminal id returned by `tab.create`. Keeping the distinction in the
 /// request prevents UI code from selecting remote commands itself.
+///
+/// A Direct SSH terminal (ADR 0039) is the account's own login shell in a PTY,
+/// outside herdr. Its identifier only names the session, so two can stream on
+/// one connection at once.
 enum TerminalAttachTarget: Sendable, Hashable {
     case agentPane(String)
     case terminal(String)
+    case loginShell(String)
 
     var identifier: String {
         switch self {
-        case .agentPane(let identifier), .terminal(let identifier):
+        case .agentPane(let identifier), .terminal(let identifier),
+            .loginShell(let identifier):
             identifier
         }
     }

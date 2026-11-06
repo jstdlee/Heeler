@@ -7,6 +7,10 @@ Entries reference the pull request that made the change.
 
 ## [Unreleased]
 
+### Added
+
+- Open an SSH Terminal or browse Files on any saved Host, from its row in Hosts (swipe right or long-press). SSH Terminal runs your login shell in Heeler's terminal, with the same keyboard row, paste review and themes, and works whether or not the Host runs herdr. Files lists a folder over SFTP, folders first, opens or shares a file through Quick Look, uploads from Files, and makes, renames and deletes items; uploads and renames never replace an existing item, and only empty folders can be deleted. Both use the Host's routes, credentials and already-trusted host key, so a Host is connected once from its detail before they work. Not on native Windows Hosts.
+
 ## [0.1.18]
 
 ### Added
